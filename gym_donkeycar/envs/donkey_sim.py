@@ -2,6 +2,8 @@
 file: donkey_sim.py
 author: Tawn Kramer
 date: 2018-08-31
+
+supply all telemetry messages to observe function
 '''
 
 import time
@@ -111,6 +113,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
                     "aborted": self.on_abort,
                     "missed_checkpoint": self.on_missed_checkpoint,
                     "need_car_config": self.on_need_car_config}
+        self.gyro = [] # rbx
+        self.vel  = [] # rbx
+        self.accel= [] # rbx
+        self.laps_completed = 0 # rbx
+        self.current_lap_time = 0.0 # rbx
+        self.data = [] # rbx
 
     def on_connect(self, client):
         logger.debug("socket connected")
@@ -150,7 +158,7 @@ class DonkeyUnitySimHandler(IMesgHandler):
     def set_racer_bio(self, conf):
         self.conf = conf
         if "bio" in conf :
-            self.send_racer_bio(conf["racer_name"], conf["car_name"], conf["bio"], conf["country"])
+            self.send_racer_bio(conf["racer_name"], conf["car_name"], conf["bio"], conf["country"], conf["guid"])
 
     def on_recv_message(self, message):
         if 'msg_type' not in message:
@@ -162,6 +170,8 @@ class DonkeyUnitySimHandler(IMesgHandler):
             self.fns[msg_type](message)
         else:
             logger.warning(f'unknown message type {msg_type}')
+        #del message["image"]
+        #print("rbx mesg received: donkey_sim.py: ",message)
 
     ## ------- Env interface ---------- ##
 
@@ -197,8 +207,46 @@ class DonkeyUnitySimHandler(IMesgHandler):
         observation = self.image_array
         done = self.is_game_over()
         reward = self.calc_reward(done)
-        info = {'pos': (self.x, self.y, self.z), 'cte': self.cte,
-                "speed": self.speed, "hit": self.hit}
+        #info = {'pos': (self.x, self.y, self.z), 'cte': self.cte,
+        #        "speed": self.speed, "hit": self.hit}
+
+        # rbx
+        info = {
+            "steering_angle": self.steering_angle,
+            "throttle": self.throttle,
+            "speed": self.speed,
+            "hit":   self.hit,
+            "time":  self.time,
+            "accel": (self.accel_x, self.accel_y, self.accel_z),
+            "gyro":  (self.gyro_x, self.gyro_y, self.gyro_z, self.gyro_z),
+            "pos":   (self.x, self.y, self.z),
+            "vel":   (self.vel_x, self.vel_y, self.vel_z),
+            "cte":   self.cte,
+            "activeNode":self.activeNode,
+            "totalNodes":self.totalNodes,
+            "disqualified": self.disqualified,
+            "bestLapTimeMS": self.bestLapTimeMS,
+            "currentLapTimeMS": self.currentLapTimeMS,
+            "numLapsCompleted": self.numLapsCompleted,
+            "on_road": self.on_road,
+            "progress_on_shortest_path": self.progress_on_shortest_path
+        }
+        # rbx
+
+        """
+        donkey_sim:  {'msg_type': 'telemetry', 'steering_angle': 0, 'throttle': 0, 
+        'speed': 0.0002537463, 'hit': 'none', 
+        'time': 9714.574, 
+        'accel_x': 6.653834e-05, 'accel_y': 8.470644e-05, 'accel_z': -0.0002268534, 
+        'gyro_x': -3.883583e-06, 'gyro_y': -1.188326e-07, 'gyro_z': -3.279242e-06, 
+        'gyro_w': 1, 
+        'pos_x': 51.31769, 'pos_y': 5.26018, 'pos_z': 50.21447, 
+        'vel_x': 6.07326e-05, 'vel_y': 6.816578e-05, 'vel_z': -0.0002367534, 
+        'cte': 2.883248, 'activeNode': 0, 'totalNodes': 251, 
+        'disqualified': 0, 'bestLapTimeMS': 1000000, 
+        'currentLapTimeMS': 0, 'numLapsCompleted': 0, 
+        'on_road': 1, 'progress_on_shortest_path': 1.907349e-05}
+        """
 
         #self.timer.on_frame()
 
@@ -240,10 +288,38 @@ class DonkeyUnitySimHandler(IMesgHandler):
         # always update the image_array as the observation loop will hang if not changing.
         self.image_array = np.asarray(image)
 
-        self.x = data["pos_x"]
-        self.y = data["pos_y"]
-        self.z = data["pos_z"]
+        self.steering_angle = data["steering_angle"]
+        self.throttle = data["throttle"]
+
         self.speed = data["speed"]
+        self.time = data["time"]
+
+        self.accel_x = data["accel_x"]
+        self.accel_y = data["accel_y"]
+        self.accel_z = data["accel_z"]
+
+        self.gyro_x = data["gyro_x"]
+        self.gyro_y = data["gyro_y"]
+        self.gyro_z = data["gyro_z"]
+
+        try:
+            self.x = data["pos_x"]
+            self.y = data["pos_y"]
+            self.z = data["pos_z"]
+            self.vel_x = data["vel_x"]
+            self.vel_y = data["vel_y"]
+            self.vel_z = data["vel_z"]
+        except:
+            pass
+
+        self.disqualified = data["disqualified"]
+        self.bestLapTimeMS = data["bestLapTimeMS"]
+        self.currentLapTimeMS = data["currentLapTimeMS"]
+        self.numLapsCompleted = data["numLapsCompleted"]
+        self.on_road = data["on_road"]
+        self.progress_on_shortest_path = data["progress_on_shortest_path"]
+        self.activeNode = data["activeNode"]
+        self.totalNodes = data["totalNodes"]
 
         # Cross track error not always present.
         # Will be missing if path is not setup in the given scene.
@@ -258,6 +334,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.hit = data["hit"]
 
         self.determine_episode_over()
+        
+        #del data["image"]
+        #print("donkey_sim.py: ",data)
+
+
+
 
     def on_cross_start(self, data):        
         logger.info(f"crossed start line: lap_time {data['lap_time']}")
@@ -357,7 +439,8 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.blocking_send(msg)
         time.sleep(0.1)
 
-    def send_racer_bio(self, racer_name, car_name, bio, country):
+    #def send_racer_bio(self, racer_name, car_name, bio, country):
+    def send_racer_bio(self, racer_name, car_name, bio, country, guid):
         # body_style = "donkey" | "bare" | "car01" choice of string
         # body_rgb  = (128, 128, 128) tuple of ints
         # car_name = "string less than 64 char"
@@ -365,7 +448,8 @@ class DonkeyUnitySimHandler(IMesgHandler):
             'racer_name': racer_name,
             'car_name' : car_name,
             'bio' : bio,
-            'country' : country }
+            'country' : country,
+            'guid' : guid }
         self.blocking_send(msg)
         time.sleep(0.1)
 
